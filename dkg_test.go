@@ -6,7 +6,6 @@ import (
 	// 	"sync"
 	// 	"time"
 
-	"bytes"
 	"fmt"
 	"testing"
 
@@ -14,10 +13,11 @@ import (
 
 	"go.dedis.ch/kyber/v3"
 	"go.dedis.ch/kyber/v3/group/edwards25519"
-	"go.dedis.ch/kyber/v3/share"
+
+	//"go.dedis.ch/kyber/v3/share"
 	rabin_dkg "go.dedis.ch/kyber/v3/share/dkg/rabin"
+	"go.dedis.ch/kyber/v3/sign/dss"
 	"go.dedis.ch/kyber/v3/sign/eddsa"
-	"go.dedis.ch/kyber/v3/sign/schnorr"
 )
 
 var suite = edwards25519.NewBlakeSHA256Ed25519()
@@ -112,22 +112,22 @@ func TestFullExchange(t *testing.T) {
 
 	// Process secret commits for each node
 	var err error
-	sec_comm := make([]*rabin_dkg.SecretCommits, nbParticipants)
+	secComm := make([]*rabin_dkg.SecretCommits, nbParticipants)
 	for i := 0; i < len(dkgs); i++ {
-		sec_comm[i], err = dkgs[i].SecretCommits()
+		secComm[i], err = dkgs[i].SecretCommits()
 		require.Nil(t, err)
 	}
 
 	// Create 2D arrays to store complaints
-	comp_comm := make([][]*rabin_dkg.ComplaintCommits, nbParticipants)
-	for i := range comp_comm {
-		comp_comm[i] = make([]*rabin_dkg.ComplaintCommits, nbParticipants)
+	compComm := make([][]*rabin_dkg.ComplaintCommits, nbParticipants)
+	for i := range compComm {
+		compComm[i] = make([]*rabin_dkg.ComplaintCommits, nbParticipants)
 	}
 
 	// Process secret commits
 	for i := 0; i < len(dkgs); i++ {
 		for j := 0; j < len(dkgs); j++ {
-			comp_comm[i][j], err = dkgs[i].ProcessSecretCommits(sec_comm[j])
+			compComm[i][j], err = dkgs[i].ProcessSecretCommits(secComm[j])
 			require.Nil(t, err)
 		}
 	}
@@ -156,45 +156,45 @@ func TestFullExchange(t *testing.T) {
 
 	}
 
-	msg := []byte("test")
+	// msg to sign
+	msg := []byte("hello")
 
-	// Test partial signatures
-	partialSigs := make([][]byte, nbParticipants)
-	kScalarsPSigs := make([]kyber.Scalar, nbParticipants)
-	priSharesPSigs := make([]*share.PriShare, nbParticipants)
+	// create dss struct
+	dsses := make([]*dss.DSS, nbParticipants)
 	for i := 0; i < len(dkgs); i++ {
-		// Do not use the DSS in the case of a single node.
-		partialSigs[i], err = schnorr.Sign(suite, distKeyShares[i].PriShare().V, msg)
+		dsses[i], err = dss.NewDSS(suite, partSec[i], partPubs, distKeyShares[i], distKeyShares[i], msg, thresh)
+		require.NotNil(t, dsses[i])
 		require.Nil(t, err)
-		fmt.Println(partialSigs[i])
-		kScalarsPSigs[i] = suite.Scalar()
-		kScalarsPSigs[i].SetBytes(partialSigs[i])
-		fmt.Println(kScalarsPSigs[i])
-		priSharesPSigs[i] = &share.PriShare{
-			I: i,
-			V: kScalarsPSigs[i],
+	}
+
+	// partial sig
+	partialSigs := make([]*dss.PartialSig, nbParticipants)
+	for i := 0; i < len(dkgs); i++ {
+		partialSigs[i], err = dsses[i].PartialSig()
+		require.Nil(t, err)
+	}
+
+	// process partial sigs
+	for i := 0; i < len(dkgs); i++ {
+		for j := 0; j < len(dkgs); j++ {
+			if i != j {
+				err = dsses[i].ProcessPartialSig(partialSigs[j])
+				require.Nil(t, err)
+			}
 		}
 	}
 
-	// Verify share
+	// make final signature
+	finalSigs := make([][]byte, nbParticipants)
 	for i := 0; i < len(dkgs); i++ {
-		err = eddsa.Verify(partPubs[i], msg, partialSigs[i])
+		finalSigs[i], err = dsses[i].Signature()
 		require.Nil(t, err)
 	}
 
-	// Recover final sig
-	gamma, err := share.RecoverSecret(suite, priSharesPSigs, thresh, nbParticipants)
-	require.Nil(t, err)
-
-	var buff bytes.Buffer
-	_, _ = distKeyShares[0].Commitments()[0].MarshalTo(&buff)
-	_, _ = gamma.MarshalTo(&buff)
-	signatureBytes := buff.Bytes()
-
-	fmt.Printf("Final signature: %x\n", signatureBytes)
-
-	// Verify final sig
-	err = eddsa.Verify(pubKey, msg, signatureBytes)
-	require.Nil(t, err)
+	// verify signature
+	for i := 0; i < len(dkgs); i++ {
+		err = eddsa.Verify(distKeyShares[i].Public(), msg, finalSigs[i])
+		require.Nil(t, err)
+	}
 
 }
