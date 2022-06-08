@@ -128,6 +128,7 @@ func TestFullExchange(t *testing.T) {
 	}
 
 	// TODO ProcessComplaintsCommits
+	// TODO ADD OK to check if no complaints
 	// TODO ReconstructCommits
 
 	// Checks that all nodes have all infos to get the distributed key
@@ -139,6 +140,7 @@ func TestFullExchange(t *testing.T) {
 	distKeyShares := make([]*rabin_dkg.DistKeyShare, nbParticipants)
 	for i := 0; i < len(dkgs); i++ {
 		distKeyShares[i], err = dkgs[i].DistKeyShare()
+		require.Nil(t, err)
 	}
 
 	// Compute distributed public key from polynomial
