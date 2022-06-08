@@ -5,6 +5,8 @@ import (
 
 	// 	"sync"
 	// 	"time"
+
+	"bytes"
 	"fmt"
 	"testing"
 
@@ -12,7 +14,10 @@ import (
 
 	"go.dedis.ch/kyber/v3"
 	"go.dedis.ch/kyber/v3/group/edwards25519"
+	"go.dedis.ch/kyber/v3/share"
 	rabin_dkg "go.dedis.ch/kyber/v3/share/dkg/rabin"
+	"go.dedis.ch/kyber/v3/sign/eddsa"
+	"go.dedis.ch/kyber/v3/sign/schnorr"
 )
 
 var suite = edwards25519.NewBlakeSHA256Ed25519()
@@ -144,8 +149,52 @@ func TestFullExchange(t *testing.T) {
 	}
 
 	// Compute distributed public key from polynomial
+	var pubKey kyber.Point
 	for i := 0; i < len(dkgs); i++ {
-		fmt.Println(distKeyShares[i].Public())
+		pubKey = distKeyShares[i].Public()
+		fmt.Println(pubKey)
+
 	}
+
+	msg := []byte("test")
+
+	// Test partial signatures
+	partialSigs := make([][]byte, nbParticipants)
+	kScalarsPSigs := make([]kyber.Scalar, nbParticipants)
+	priSharesPSigs := make([]*share.PriShare, nbParticipants)
+	for i := 0; i < len(dkgs); i++ {
+		// Do not use the DSS in the case of a single node.
+		partialSigs[i], err = schnorr.Sign(suite, distKeyShares[i].PriShare().V, msg)
+		require.Nil(t, err)
+		fmt.Println(partialSigs[i])
+		kScalarsPSigs[i] = suite.Scalar()
+		kScalarsPSigs[i].SetBytes(partialSigs[i])
+		fmt.Println(kScalarsPSigs[i])
+		priSharesPSigs[i] = &share.PriShare{
+			I: i,
+			V: kScalarsPSigs[i],
+		}
+	}
+
+	// Verify share
+	for i := 0; i < len(dkgs); i++ {
+		err = eddsa.Verify(partPubs[i], msg, partialSigs[i])
+		require.Nil(t, err)
+	}
+
+	// Recover final sig
+	gamma, err := share.RecoverSecret(suite, priSharesPSigs, thresh, nbParticipants)
+	require.Nil(t, err)
+
+	var buff bytes.Buffer
+	_, _ = distKeyShares[0].Commitments()[0].MarshalTo(&buff)
+	_, _ = gamma.MarshalTo(&buff)
+	signatureBytes := buff.Bytes()
+
+	fmt.Printf("Final signature: %x\n", signatureBytes)
+
+	// Verify final sig
+	err = eddsa.Verify(pubKey, msg, signatureBytes)
+	require.Nil(t, err)
 
 }

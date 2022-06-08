@@ -20,6 +20,7 @@ go.dedis.ch/kyber/v3/group/mod
 go.dedis.ch/kyber/v3/share
 go.dedis.ch/kyber/v3/share/dkg/rabin
 go.dedis.ch/kyber/v3/share/vss/rabin
+go.dedis.ch/kyber/v3/sign/eddsa
 go.dedis.ch/kyber/v3/sign/schnorr
 go.dedis.ch/kyber/v3/util/random
 go.dedis.ch/kyber/v3/xof/blake2xb
